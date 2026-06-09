@@ -16,6 +16,7 @@ import json
 
 # TODO
 # - Check to see if its any point in using mysql.connector.connect in every thread that tries to access the database
+# - Progression bar is not displayed in the nohup file anymore, add progression bar somewhere
 
 # GLOBALS
 SESSION = requests.Session()
