@@ -61,3 +61,16 @@ def initialise():
         ad_list.append(i)
 
     return useFile, ad_list, start, finish, configData
+
+def appendProgress(configData, useFile, URL, i):
+    try:
+        #Write progression to INI file
+        if (useFile == "False"):
+            configData["progress"]["progression"] = str(i)
+        configData["progress"]["currentURL"] = URL
+
+        with open("".join((os.path.dirname(os.path.realpath(__file__)), '/config.ini')), 'w') as conf:
+            configData.write(conf)
+    except Exception as e:
+        logging.error(i, " - ", "Error getting data form ini file or URL file. Exception thrown: ", str(e))
+

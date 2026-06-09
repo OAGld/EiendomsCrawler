@@ -1,7 +1,6 @@
 import requests
 from bs4 import BeautifulSoup
 import mysql.connector
-#import configparser
 import time
 import threading
 from concurrent.futures import ThreadPoolExecutor
@@ -12,7 +11,6 @@ from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 import random
 import re
-import datetime
 import Auxiliary
 import json
 
@@ -36,7 +34,7 @@ _retry = Retry(
 
 SESSION.mount("https://", HTTPAdapter(max_retries=_retry, pool_connections=20, pool_maxsize=20))
 
-THREAD_LIMIT = threading.BoundedSemaphore(3)
+CONFIG_LOCK = threading.Lock()
 
 
 def main():
@@ -50,17 +48,17 @@ def main():
     finished = False
     while(not finished):
 
-        while(connected() & (not finished)):
+        while connected() and not finished:
             connectionTries = 0
 
-            #Loop through all defined ads and ads to database
+            #Loop through all defined ads and adds to database
             if(useFile == "True"):
                 index = 0
                 for i in tqdm (ad_list, desc="Progress"):
                     i = i.rstrip('\r')
 
                     #Append progression to config file
-                    appendProgress(configData, useFile, i, None)
+                    Auxiliary.appendProgress(configData, useFile, i, None)
 
                     BoligInstance = extract(i, configData, str(index))
                     index += 1
@@ -68,51 +66,48 @@ def main():
                         finished = True
 
             else:
-                for i in tqdm (range(start, finish+1), desc="Progress"):
+
+                def worker(i):
                     try:
                         URL = "".join(("https://www.finn.no/realestate/homes/ad.html?finnkode=", str(i)))
 
                         #Append progression to config file
-                        appendProgress(configData, useFile, URL, i)
+                        with CONFIG_LOCK:
+                            Auxiliary.appendProgress(configData, useFile, URL, i)
 
+                        # Get progress
                         progress = configData.get("progress", "progression")
-                        def _worker(url, cfg, prog):
-                            with THREAD_LIMIT:
-                                extract(url, cfg, prog)
 
-                        newThread = threading.Thread(target=_worker, args=(URL, configData, progress))
-                        newThread.start()
+                        # Extract and store data
+                        extract(URL, configData, progress)
+
+                    except Exception as e:
+                        logging.error(f"{i} - Error in worker: {e}")
+
+                with ThreadPoolExecutor(max_workers=20) as executor:
+                    futures = []
+                    for i in tqdm (range(start, finish+1), desc="Progress"):
+                        
+                        futures.append(executor.submit(worker, i))
 
                         if (i == finish):
                             finished = True
+
                         #Pause to stop Finn.no from refusing connection
                         time.sleep(random.uniform(0.02, 0.05))
-                    except Exception as e:
-                        logging.error(f"{progress} - Error in the main loop: {e}")
+
+                    for future in futures:
+                        future.result()
 
         if(not finished):
             time.sleep(6)
             connectionTries += 1
             if (connectionTries == 10):
-                logging.error("".join((configData.get("progress", "progression"), " - ", "Unable to connect to 'www.finn.no', exiting program. Exception thrown: ", str(e))))
-                print("".join((str(datetime.now()), "\nUnable to connect to 'www.finn.no', exiting program. Exception thrown: ", str(e), "\n")))
+                logging.error("".join((configData.get("progress", "progression"), " - ", "Unable to connect to 'www.finn.no', exiting program.")))
                 finished = True
 
-    #newThread.join()
     logging.info("Process finished --- %s seconds ---" % (time.time() - start_time))
     print("Process finished --- %s seconds ---" % (time.time() - start_time))
-
-def appendProgress(configData, useFile, URL, i):
-    try:
-        #Write progression to INI file
-        if (useFile == "False"):
-            configData["progress"]["progression"] = str(i)
-        configData["progress"]["currentURL"] = URL
-
-        with open("".join((os.path.dirname(os.path.realpath(__file__)), '/config.ini')), 'w') as conf:
-            configData.write(conf)
-    except Exception as e:
-        logging.error(i, " - ", "Error getting data form ini file or URL file. Exception thrown: ", str(e))
 
 def connected():
     try:
