@@ -14,6 +14,9 @@ import re
 import Auxiliary
 import json
 
+# TODO
+# - Check to see if its any point in using mysql.connector.connect in every thread that tries to access the database
+
 # GLOBALS
 SESSION = requests.Session()
 SESSION.headers.update({
@@ -32,7 +35,7 @@ _retry = Retry(
     allowed_methods=["GET"],
 )
 
-SESSION.mount("https://", HTTPAdapter(max_retries=_retry, pool_connections=20, pool_maxsize=20))
+SESSION.mount("https://", HTTPAdapter(max_retries=_retry, pool_connections=80, pool_maxsize=80))
 
 CONFIG_LOCK = threading.Lock()
 
@@ -48,9 +51,10 @@ def main():
     finished = False
     while(not finished):
 
-        while connected() and not finished:
-            connectionTries = 0
+        connectionTries = 0
 
+        while connected() and not finished:
+            
             #Loop through all defined ads and adds to database
             if(useFile == "True"):
                 index = 0
@@ -66,8 +70,8 @@ def main():
                         finished = True
 
             else:
-
                 def worker(i):
+                    print(i)
                     try:
                         URL = "".join(("https://www.finn.no/realestate/homes/ad.html?finnkode=", str(i)))
 
@@ -75,35 +79,25 @@ def main():
                         with CONFIG_LOCK:
                             Auxiliary.appendProgress(configData, useFile, URL, i)
 
-                        # Get progress
-                        progress = configData.get("progress", "progression")
-
                         # Extract and store data
-                        extract(URL, configData, progress)
+                        extract(URL, configData, str(i))
 
                     except Exception as e:
                         logging.error(f"{i} - Error in worker: {e}")
 
-                with ThreadPoolExecutor(max_workers=20) as executor:
-                    futures = []
-                    for i in tqdm (range(start, finish+1), desc="Progress"):
-                        
-                        futures.append(executor.submit(worker, i))
-
-                        if (i == finish):
+                with ThreadPoolExecutor(max_workers=80) as executor:
+                    count = 0
+                    for _ in tqdm(executor.map(worker, range(start, finish + 1)), total=finish - start + 1, desc="Progress"):
+                        count += 1
+                        if count >= finish - start + 1:
                             finished = True
-
-                        #Pause to stop Finn.no from refusing connection
-                        time.sleep(random.uniform(0.02, 0.05))
-
-                    for future in futures:
-                        future.result()
 
         if(not finished):
             time.sleep(6)
             connectionTries += 1
             if (connectionTries == 10):
-                logging.error("".join((configData.get("progress", "progression"), " - ", "Unable to connect to 'www.finn.no', exiting program.")))
+                with CONFIG_LOCK:
+                    logging.error("".join((configData.get("progress", "progression"), " - ", "Unable to connect to 'www.finn.no', exiting program.")))
                 finished = True
 
     logging.info("Process finished --- %s seconds ---" % (time.time() - start_time))
@@ -190,12 +184,13 @@ class store:
 
         mydb = mycursor = None
         try:
-            mydb = mysql.connector.connect(
-                host=Bolig.configData.get("mysql", "host"),
-                user=Bolig.configData.get("mysql", "user"),
-                password=Bolig.configData.get("mysql", "password"),
-                database=Bolig.configData.get("mysql", "database"),
-            )
+            with CONFIG_LOCK:
+                mydb = mysql.connector.connect(
+                    host=Bolig.configData.get("mysql", "host"),
+                    user=Bolig.configData.get("mysql", "user"),
+                    password=Bolig.configData.get("mysql", "password"),
+                    database=Bolig.configData.get("mysql", "database"),
+                )
             mycursor = mydb.cursor()
             mycursor.execute(create_sql)
             mycursor.execute(insert_sql, values)
@@ -454,7 +449,7 @@ class extract:
     def extract_ownership_history(self, URL):
         #Parse page
         try:
-            Get_page = requests.get(URL)
+            Get_page = SESSION.get(URL)
             ownership_history_page = BeautifulSoup(Get_page.content, 'html.parser')
         except Exception as e:
             logging.info("".join((self.progress, " - ", "Error parsing ownership history page. Exception thrown: ", str(e))))
