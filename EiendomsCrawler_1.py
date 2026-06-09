@@ -195,7 +195,7 @@ class store:
             mycursor.execute(create_sql)
             mycursor.execute(insert_sql, values)
             mydb.commit()
-            logging.info(f"{self.progress} - {int(Bolig.URL.split("finnkode=")[1].split("&")[0])} successfully added to table.")
+            logging.info(f"{self.progress} - {int(Bolig.URL.split('finnkode=')[1].split('&')[0])} successfully added to table.")
         except Exception as e:
             logging.error(f"{self.progress} - Error when writing to database: {e}")
         finally:
