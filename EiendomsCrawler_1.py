@@ -11,7 +11,7 @@ from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 import random
 import re
-import Auxiliary
+#import Auxiliary
 import json
 
 # TODO
@@ -36,7 +36,7 @@ _retry = Retry(
     allowed_methods=["GET"],
 )
 
-SESSION.mount("https://", HTTPAdapter(max_retries=_retry, pool_connections=80, pool_maxsize=80))
+SESSION.mount("https://", HTTPAdapter(max_retries=_retry, pool_connections=40, pool_maxsize=40))
 
 CONFIG_LOCK = threading.Lock()
 
@@ -72,7 +72,6 @@ def main():
 
             else:
                 def worker(i):
-                    print(i)
                     try:
                         URL = "".join(("https://www.finn.no/realestate/homes/ad.html?finnkode=", str(i)))
 
@@ -86,7 +85,7 @@ def main():
                     except Exception as e:
                         logging.error(f"{i} - Error in worker: {e}")
 
-                with ThreadPoolExecutor(max_workers=80) as executor:
+                with ThreadPoolExecutor(max_workers=20) as executor:
                     count = 0
                     for _ in tqdm(executor.map(worker, range(start, finish + 1)), total=finish - start + 1, desc="Progress"):
                         count += 1
