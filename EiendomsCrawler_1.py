@@ -83,6 +83,8 @@ def main():
                         # Extract and store data
                         extract(URL, configData, str(i))
 
+                        time.sleep(random.uniform(0.005, 0.01))
+
                     except Exception as e:
                         logging.error(f"{i} - Error in worker: {e}")
                         del e
