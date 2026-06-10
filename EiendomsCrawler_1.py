@@ -11,7 +11,7 @@ from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 import random
 import re
-#import Auxiliary
+import Auxiliary
 import json
 
 # TODO
