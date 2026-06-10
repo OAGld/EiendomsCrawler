@@ -3,10 +3,9 @@ from bs4 import BeautifulSoup
 import mysql.connector
 import time
 import threading
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import logging
 from tqdm import tqdm
-import os
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 import random
@@ -37,9 +36,10 @@ _retry = Retry(
     allowed_methods=["GET"],
 )
 
-SESSION.mount("https://", HTTPAdapter(max_retries=_retry, pool_connections=40, pool_maxsize=40))
+SESSION.mount("https://", HTTPAdapter(max_retries=_retry, pool_connections=80, pool_maxsize=80))
 
 CONFIG_LOCK = threading.Lock()
+MAX_WORKERS = 80
 
 
 def main():
@@ -83,19 +83,20 @@ def main():
                         # Extract and store data
                         extract(URL, configData, str(i))
 
-                        time.sleep(random.uniform(0.005, 0.01))
+                        #time.sleep(random.uniform(0.005, 0.01))
 
                     except Exception as e:
                         logging.error(f"{i} - Error in worker: {e}")
-                        del e
+            
 
                     # Force Python to clear circular references regularly
                     if random.random() < 0.1: # 10% chance per thread execution to keep it lightweight
                         gc.collect()
-
-                with ThreadPoolExecutor(max_workers=20) as executor:
+                
+                with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
+                    futures = [executor.submit(worker, i) for i in range(start, finish + 1)]
                     count = 0
-                    for _ in tqdm(executor.map(worker, range(start, finish + 1)), total=finish - start + 1, desc="Progress"):
+                    for f in tqdm(as_completed(futures), total=len(futures)):
                         count += 1
                         if count >= finish - start + 1:
                             finished = True
@@ -206,7 +207,6 @@ class store:
             logging.info(f"{self.progress} - {int(Bolig.URL.split('finnkode=')[1].split('&')[0])} successfully added to table.")
         except Exception as e:
             logging.error(f"{self.progress} - Error when writing to database: {e}")
-            del e
         finally:
             if mycursor: 
                 mycursor.close()
@@ -245,21 +245,24 @@ class extract:
         self.sistEndretDT = None
 
         web_page = SESSION.get(URL, timeout=10)
+        adpage = BeautifulSoup(web_page.content, "html.parser")
 
-        if(extract.adpage_exists(self, web_page)): #returns true if the ad exists
-            extract.extract_adpage(self, web_page)
+        if(extract.adpage_exists(self, adpage)): #returns true if the ad exists
+            extract.extract_adpage(self, adpage)
             extract.extract_ownership_history(self, self.eierhistorie_URL)
 
             #Store data if ad exists, passes the current instance to store class
             store(self, progress)
 
+            web_page.close()
+
             return
+        web_page.close()
         return
 
-    def adpage_exists(self, web_page):
+    def adpage_exists(self, adpage):
         
         try:
-            adpage = BeautifulSoup(web_page.content, "html.parser")
 
             # Positive check: a real ad page contains the detailed section or FINN-kode text.
             exists = (
@@ -270,17 +273,8 @@ class extract:
             return exists
         except Exception as e:
             logging.error("".join((self.progress, " - ", "Error checking ad page existence. Exception thrown: ", str(e))))
-            del e
 
-    def extract_adpage(self, web_page):
-
-        #Parse page
-        try:
-            adpage = BeautifulSoup(web_page.content, 'html.parser')
-        except Exception as e:
-            logging.error("".join((self.progress, " - ", "Error with GET request or parsing page. Exception thrown: ", str(e))))
-            del e
-
+    def extract_adpage(self, adpage):
 
         #Find tags containing all relevant data
         try:
@@ -289,7 +283,6 @@ class extract:
             tag3 = tag2.find('section', attrs={'aria-label': 'Detaljert informasjon om bolig'})
         except Exception as e:
             logging.error("".join((self.progress, " - ", "Error getting main tags for extraction. Exception thrown: ", str(e))))
-            del e
 
         #Find sist endret and create a datetime version of it as well
         try:
@@ -300,7 +293,6 @@ class extract:
             self.sistEndretDT = Auxiliary.parse_norwegian_date(self.sistEndret)
         except Exception as e:
             logging.info("".join((self.progress, " - ", "Error extracting 'sist endret dato'. Exception thrown: ", str(e))))
-            del e
 
         #Extract address
         try:
@@ -308,7 +300,6 @@ class extract:
             self.adresse = address_section.find('span', attrs={'data-testid': 'object-address'}).text.strip()
         except Exception as e:
             logging.info("".join((self.progress, " - ", "Error extracting address. Exception thrown: ", str(e))))
-            del e
 
         #Extract price info
         try:
@@ -324,7 +315,6 @@ class extract:
             self.totalpris = int(''.join(filter(str.isdigit, totalpris_div.find('dd').text.strip())))
         except Exception as e:
             logging.info("".join((self.progress, " - ", "Error extracting price data. Exception thrown: ", str(e))))
-            del e
 
         #Extract common monthly cost
         try:
@@ -333,7 +323,6 @@ class extract:
             self.felleskostnader = int(''.join(filter(str.isdigit, felleskostnad_div.find('dd').text.strip())))
         except Exception as e:
             logging.info("".join((self.progress, " - ", "Error extracting 'felleskostnader'. Exception thrown: ", str(e))))
-            del e
 
         #Extract municipal fees
         try:
@@ -342,7 +331,6 @@ class extract:
             self.kommunaleAvgifter = int(''.join(filter(str.isdigit, kommunale_avgifter_div.find('dd').text.strip())))
         except Exception as e:
             logging.info("".join((self.progress, " - ", "Error extracting 'kommunale avgifter'. Exception thrown: ", str(e))))
-            del e 
 
         #Finn URL til eierhistorie siden
         try:
@@ -351,7 +339,6 @@ class extract:
             
         except Exception as e:
             logging.info("".join((self.progress, " - ", "Error extracting URL for ownership history. Exception thrown: ", str(e))))
-            del e
 
         #extract key info
         #Finn n�kkelinfo hoved tags
@@ -360,7 +347,6 @@ class extract:
             nokkelinfo_list = nokkelinfo_section.find('dl')
         except Exception as e:
             logging.info("".join((self.progress, " - ", "Error extracting main tags for 'key info'. Exception thrown: ", str(e))))
-            del e
 
         #Finn boligtype
         try:
@@ -368,7 +354,6 @@ class extract:
             self.boligtype = boligtype_div.find('dd').text.strip()
         except Exception as e:
             logging.info("".join((self.progress, " - ", "Error finding 'Boligtype'. Exception thrown: ", str(e))))
-            del e
 
         #Finn eierform
         try:
@@ -376,7 +361,6 @@ class extract:
             self.eierform = eierform_div.find('dd').text.strip()
         except Exception as e:
             logging.info("".join((self.progress, " - ", "Error finding 'eierform'. Exception thrown: ", str(e))))
-            del e
 
         #Finn antall soverom
         try:
@@ -384,7 +368,6 @@ class extract:
             self.soverom = soverom_div.find('dd').text.strip()
         except Exception as e:
             logging.info("".join((self.progress, " - ", "Error finding 'Antall soverom'. Exception thrown: ", str(e))))
-            del e
 
         #Finn prim�rrom
         try:
@@ -392,7 +375,6 @@ class extract:
             self.primerrom = int(primerrom_div.find('dd').text.strip()[:-2])
         except Exception as e:
             logging.info("".join((self.progress, " - ", "Error finding 'Primærrom'. Exception thrown: ", str(e))))
-            del e
 
         #Finn bruksareal
         try:
@@ -400,7 +382,6 @@ class extract:
             self.bruksareal = int(bruksareal_div.find('dd').text.strip()[:-2])
         except Exception as e:
             logging.info("".join((self.progress, " - ", "Error finding 'Bruksareal'. Exception thrown: ", str(e))))
-            del e
 
         #Finn etasje
         try:
@@ -408,7 +389,6 @@ class extract:
             self.etasje = int(''.join(filter(str.isdigit, etasje_div.find('dd').text.strip())))
         except Exception as e:
             logging.info("".join((self.progress, " - ", "Error finding 'Etasje'. Exception thrown: ", str(e))))
-            del e
 
         #Finn bygge�r
         try:
@@ -416,7 +396,6 @@ class extract:
             self.byggear = int(''.join(filter(str.isdigit, byggear_div.find('dd').text.strip())))
         except Exception as e:
             logging.info("".join((self.progress, " - ", "Error finding 'Byggeår'. Exception thrown: ", str(e))))
-            del e
 
         #Finn energimerke
         try:
@@ -424,7 +403,6 @@ class extract:
             self.energimerke = energimerke_div.find('dd').text.strip()
         except Exception as e:
             logging.info("".join((self.progress, " - ", "Error finding 'Energimerke'. Exception thrown: ", str(e))))
-            del e
 
         #Finn antall rom
         try:
@@ -432,7 +410,6 @@ class extract:
             self.rom = int(''.join(filter(str.isdigit, rom_div.find('dd').text.strip())))
         except Exception as e:
             logging.info("".join((self.progress, " - ", "Error finding 'Antall rom'. Exception thrown: ", str(e))))
-            del e
 
         #Finn Tomteareal
         try:
@@ -440,7 +417,6 @@ class extract:
             self.plotArea = int(''.join(filter(str.isdigit, plotArea_div.find('dd').text.strip()[:-9])))
         except Exception as e:
             logging.info("".join((self.progress, " - ", "Error finding 'Tomteareal'. Exception thrown: ", str(e))))
-            del e
 
         #Finn fasiliteter hoved tags
         try:
@@ -448,7 +424,6 @@ class extract:
             facilities_list = facilities_section.find('div')
         except Exception as e:
             logging.info("".join((self.progress, " - ", "Error finding main tags for 'Fasiliteter'. Exception thrown: ", str(e))))
-            del e
 
         #Extract data
         try:
@@ -466,7 +441,6 @@ class extract:
                 self.parkering = 'Nei'
         except Exception as e:
             logging.info("".join((self.progress, " - ", "Error extracting balcony and parking data. Exception thrown: ", str(e))))
-            del e
 
         #Finn "Om boligen"
         try:
@@ -475,7 +449,6 @@ class extract:
             self.beskrivelse = description_div.get_text("\n", strip=True)
         except Exception as e:
             logging.info("".join((self.progress, " - ", "Error finding main tags for 'Fasiliteter'. Exception thrown: ", str(e))))
-            del e
 
         del adpage
 
@@ -487,7 +460,6 @@ class extract:
             ownership_history_page = BeautifulSoup(Get_page.content, 'html.parser')
         except Exception as e:
             logging.info("".join((self.progress, " - ", "Error parsing ownership history page. Exception thrown: ", str(e))))
-            del e
 
         #Find tags containing all relevant data and extract data
         try:
@@ -505,7 +477,6 @@ class extract:
                 self.Tidligerekjop.append(kjopsdata)
         except Exception as e:
             logging.info("".join((self.progress, " - ", "Error extracting ownership history. Exception thrown: ", str(e))))
-            del e
 
 main()
 
