@@ -123,59 +123,47 @@ def connected():
  
 class store:
 
-    def __init__(self, Bolig, progress):
-        #Bolig is the inherited instance
-        self.Bolig = Bolig
+    def __init__(self, Boligdata, progress, configData):
+        self.Boligdata = Boligdata
         self.progress = progress
-        store.writeToDatabase(self, Bolig)
+        self.writeToDatabase(Boligdata, progress, configData)
 
-    def writeToDatabase(self, Bolig):
+    def writeToDatabase(self, Boligdata, progress, configData):
 
         COLUMNS = [
-            ("Finnkode", "BIGINT", lambda b: int(b.URL.split("finnkode=")[1].split("&")[0])),
-            ("Link", "VARCHAR(255)", lambda b: b.URL),
-            ("Adresse", "VARCHAR(255)", lambda b: getattr(b, "adresse", None)),
-
-            ("Prisantydning", "VARCHAR(255)", lambda b: getattr(b, "prisantydning", None)),
-            ("Totalpris", "VARCHAR(255)", lambda b: getattr(b, "totalpris", None)),
-            ("Felleskostnader", "VARCHAR(255)", lambda b: getattr(b, "felleskostnader", None)),
-            ("KommunaleAvgifter", "VARCHAR(255)", lambda b: getattr(b, "kommunaleAvgifter", None)),
-
-            ("Boligtype", "VARCHAR(255)", lambda b: getattr(b, "boligtype", None)),
-            ("Eierform", "VARCHAR(255)", lambda b: getattr(b, "eierform", None)),
-
-            ("AntallSoverom", "INT", lambda b: getattr(b, "soverom", None)),
-            ("ArealPrimerrom", "INT", lambda b: getattr(b, "primerrom", None)),
-            ("Bruksareal", "INT", lambda b: getattr(b, "bruksareal", None)),
-
-            ("Etasje", "VARCHAR(255)", lambda b: getattr(b, "etasje", None)),
-            ("Byggear", "VARCHAR(255)", lambda b: getattr(b, "byggear", None)),
-            ("Energimerke", "VARCHAR(255)", lambda b: getattr(b, "energimerke", None)),
-
-            ("AntallRom", "INT", lambda b: getattr(b, "rom", None)),
-            ("Parkering", "VARCHAR(5)", lambda b: getattr(b, "parkering", None)),
-            ("Balkong", "VARCHAR(5)", lambda b: getattr(b, "balkong", None)),
-
-            ("Tomteareal", "VARCHAR(255)", lambda b: getattr(b, "plotArea", None)),
-
-            ("Beskrivelse", "TEXT", lambda b: getattr(b, "beskrivelse", None)),
-
-            ("Tidligerekjøp", "TEXT", lambda b: json.dumps(getattr(b, "Tidligerekjop", None))),
-            ("SistEndret", "VARCHAR(255)", lambda b: getattr(b, "sistEndret", None)),
-
-            ("Standard_Bad", "DECIMAL(2,1)", lambda b: getattr(b, "standard_bad", None)),
-            ("Standard_Kjøkken", "DECIMAL(2,1)", lambda b: getattr(b, "standard_kjokken", None)),
-            ("Standard_Bolig", "DECIMAL(2,1)", lambda b: getattr(b, "standard_bolig", None)),
-
-            ("SistEndretDT", "DATETIME", lambda b: getattr(b, "sistEndretDT", None)),
+            ("Finnkode", "BIGINT"),
+            ("Link", "VARCHAR(255)"),
+            ("Adresse", "VARCHAR(255)"),
+            ("Prisantydning", "VARCHAR(255)"),
+            ("Totalpris", "VARCHAR(255)"),
+            ("Felleskostnader", "VARCHAR(255)"),
+            ("KommunaleAvgifter", "VARCHAR(255)"),
+            ("Boligtype", "VARCHAR(255)"),
+            ("Eierform", "VARCHAR(255)"),
+            ("AntallSoverom", "INT"),
+            ("ArealPrimerrom", "INT"),
+            ("Bruksareal", "INT"),
+            ("Etasje", "VARCHAR(255)"),
+            ("Byggear", "VARCHAR(255)"),
+            ("Energimerke", "VARCHAR(255)"),
+            ("AntallRom", "INT"),
+            ("Parkering", "VARCHAR(5)"),
+            ("Balkong", "VARCHAR(5)"),
+            ("Tomteareal", "VARCHAR(255)"),
+            ("Beskrivelse", "TEXT"),
+            ("Tidligerekjøp", "TEXT"),
+            ("SistEndret", "VARCHAR(255)"),
+            ("Standard_Bad", "DECIMAL(2,1)"),
+            ("Standard_Kjøkken", "DECIMAL(2,1)"),
+            ("Standard_Bolig", "DECIMAL(2,1)"),
+            ("SistEndretDT", "DATETIME"),
         ]
 
         table = "data"
-        col_names = [n for n, _, _ in COLUMNS]
-        col_defs  = ", ".join(f"`{n}` {t}" for n, t, _ in COLUMNS)
 
-        # Creates the table if it does not already exist, including an auto-increment primary key and a composite unique constraint
-        # on (Finnkode, SistEndret) to prevent duplicate entries for the same listing snapshot.
+        col_names = [n for n, _ in COLUMNS]
+        col_defs = ", ".join(f"`{n}` {t}" for n, t in COLUMNS)
+
         create_sql = (
             f"CREATE TABLE IF NOT EXISTS `{table}` ("
             f"`id` BIGINT NOT NULL AUTO_INCREMENT, "
@@ -184,33 +172,76 @@ class store:
             f"UNIQUE KEY `uniq_finnkode_sistendret` (`Finnkode`, `SistEndret`)"
             f")"
         )
+
         insert_sql = (
             f"INSERT IGNORE INTO `{table}` "
             f"({', '.join(f'`{c}`' for c in col_names)}) "
-            f"VALUES ({', '.join(['%s']*len(col_names))})"
+            f"VALUES ({', '.join(['%s'] * len(col_names))})"
         )
-        values = tuple(get(Bolig) for _, _, get in COLUMNS)
+
+        # direct dict extraction (no lambdas, no getattr)
+        values = (
+            Boligdata.get("Finnkode"),
+            Boligdata.get("Link"),
+            Boligdata.get("Adresse"),
+
+            Boligdata.get("Prisantydning"),
+            Boligdata.get("Totalpris"),
+            Boligdata.get("Felleskostnader"),
+            Boligdata.get("KommunaleAvgifter"),
+
+            Boligdata.get("Boligtype"),
+            Boligdata.get("Eierform"),
+
+            Boligdata.get("AntallSoverom"),
+            Boligdata.get("ArealPrimerrom"),
+            Boligdata.get("Bruksareal"),
+
+            Boligdata.get("Etasje"),
+            Boligdata.get("Byggear"),
+            Boligdata.get("Energimerke"),
+
+            Boligdata.get("AntallRom"),
+            Boligdata.get("Parkering"),
+            Boligdata.get("Balkong"),
+
+            Boligdata.get("Tomteareal"),
+            Boligdata.get("Beskrivelse"),
+
+            json.dumps(Boligdata.get("Tidligerekjøp")) if Boligdata.get("Tidligerekjøp") is not None else None,
+            Boligdata.get("SistEndret"),
+
+            Boligdata.get("Standard_Bad"),
+            Boligdata.get("Standard_Kjøkken"),
+            Boligdata.get("Standard_Bolig"),
+
+            Boligdata.get("SistEndretDT"),
+        )
 
         mydb = mycursor = None
         try:
             with CONFIG_LOCK:
                 mydb = mysql.connector.connect(
-                    host=Bolig.configData.get("mysql", "host"),
-                    user=Bolig.configData.get("mysql", "user"),
-                    password=Bolig.configData.get("mysql", "password"),
-                    database=Bolig.configData.get("mysql", "database"),
+                    host=configData.get("mysql", "host"),
+                    user=configData.get("mysql", "user"),
+                    password=configData.get("mysql", "password"),
+                    database=configData.get("mysql", "database"),
                 )
+
             mycursor = mydb.cursor()
             mycursor.execute(create_sql)
             mycursor.execute(insert_sql, values)
             mydb.commit()
-            logging.info(f"{self.progress} - {int(Bolig.URL.split('finnkode=')[1].split('&')[0])} successfully added to table.")
+
+            logging.info(f"{progress} - {Boligdata.get('Finnkode')} successfully added to table.")
+
         except Exception as e:
-            logging.error(f"{self.progress} - Error when writing to database: {e}")
+            logging.error(f"{progress} - Error when writing to database: {e}")
+
         finally:
-            if mycursor: 
+            if mycursor:
                 mycursor.close()
-            if mydb: 
+            if mydb:
                 mydb.close()
 
 
@@ -219,40 +250,16 @@ class extract:
     #all values
     def __init__(self, URL, configData, progress):
         self.URL = URL
-        self.adresse = None
-        self.postnummer = None
-        self.poststed = None
-        self.leiepris = None
-        self.depositum = None
-        self.boligtype = None
-        self.soverom = None
-        self.primerrom = None
-        self.bruksareal = None
-        self.etasje = None
-        self.energimerke = None
-        self.rom = None
-        self.parkering = None
-        self.balkong = None
-        self.eierhistorie_URL = None #URL som brukes til � finne forrige kj�pssum og dato
-        self.plotArea = None
-        self.beskrivelse = None
-        self.Tidligerekjop = []
-        self.configData = configData
         self.progress = progress
-        self.sistEndret = None
-        self.utleid = None
-        self.standard = None
-        self.sistEndretDT = None
 
         web_page = SESSION.get(URL, timeout=10)
         adpage = BeautifulSoup(web_page.content, "html.parser")
 
         if(extract.adpage_exists(self, adpage)): #returns true if the ad exists
-            extract.extract_adpage(self, adpage)
-            extract.extract_ownership_history(self, self.eierhistorie_URL)
-
+            Boligdata = extract.extract_adpage(self, adpage)
+            
             #Store data if ad exists, passes the current instance to store class
-            store(self, progress)
+            store(Boligdata, progress, configData)
 
             web_page.close()
 
@@ -263,7 +270,6 @@ class extract:
     def adpage_exists(self, adpage):
         
         try:
-
             # Positive check: a real ad page contains the detailed section or FINN-kode text.
             exists = (
                 adpage.find("section", attrs={"aria-label": "Detaljert informasjon om bolig"}) is not None
@@ -275,6 +281,38 @@ class extract:
             logging.error("".join((self.progress, " - ", "Error checking ad page existence. Exception thrown: ", str(e))))
 
     def extract_adpage(self, adpage):
+
+        DBData = {
+            "Finnkode": None,
+            "Link": None,
+            "Adresse": None,
+            "Prisantydning": None,
+            "Totalpris": None,
+            "Felleskostnader": None,
+            "KommunaleAvgifter": None,
+            "Boligtype": None,
+            "Eierform": None,
+            "AntallSoverom": None,
+            "ArealPrimerrom": None,
+            "Bruksareal": None,
+            "Etasje": None,
+            "Byggear": None,
+            "Energimerke": None,
+            "AntallRom": None,
+            "Parkering": None,
+            "Balkong": None,
+            "Tomteareal": None,
+            "Beskrivelse": None,
+            "Tidligerekjøp": [],
+            "SistEndret": None,
+            "Standard_Bad": None,
+            "Standard_Kjøkken": None,
+            "Standard_Bolig": None,
+            "SistEndretDT": None,
+        }
+
+        DBData["Finnkode"] = int(self.URL.split("finnkode=")[1].split("&")[0])
+        DBData["Link"] = self.URL
 
         #Find tags containing all relevant data
         try:
@@ -289,15 +327,15 @@ class extract:
             SistEndretMain = tag2.find('section', attrs={'aria-labelledby': 'ad-info-heading'})
             SistEndretList = SistEndretMain.find_all('tr')
             SistEndret = SistEndretList[1].find('td')
-            self.sistEndret = SistEndret.text.strip()
-            self.sistEndretDT = Auxiliary.parse_norwegian_date(self.sistEndret)
+            DBData["SistEndret"] = SistEndret.text.strip()
+            DBData["SistEndretDT"] = Auxiliary.parse_norwegian_date(DBData["SistEndret"])
         except Exception as e:
             logging.info("".join((self.progress, " - ", "Error extracting 'sist endret dato'. Exception thrown: ", str(e))))
 
         #Extract address
         try:
             address_section = tag3.find('section', attrs={'aria-label': 'Tittel'})
-            self.adresse = address_section.find('span', attrs={'data-testid': 'object-address'}).text.strip()
+            DBData["Adresse"] = address_section.find('span', attrs={'data-testid': 'object-address'}).text.strip()
         except Exception as e:
             logging.info("".join((self.progress, " - ", "Error extracting address. Exception thrown: ", str(e))))
 
@@ -308,11 +346,11 @@ class extract:
 
             # Finn prisantydning
             prisantydning_section = prisdetaljer_section.find('div', attrs={'data-testid': 'pricing-incicative-price'})
-            self.prisantydning = int(''.join(filter(str.isdigit, prisantydning_section.find('span', class_="text-28 font-bold").text.strip())))
+            DBData["Prisantydning"] = int(''.join(filter(str.isdigit, prisantydning_section.find('span', class_="text-28 font-bold").text.strip())))
 
             # Finn totalpris
             totalpris_div = prisdetaljer_list.find('div', attrs={'data-testid': 'pricing-total-price'})
-            self.totalpris = int(''.join(filter(str.isdigit, totalpris_div.find('dd').text.strip())))
+            DBData["Totalpris"] = int(''.join(filter(str.isdigit, totalpris_div.find('dd').text.strip())))
         except Exception as e:
             logging.info("".join((self.progress, " - ", "Error extracting price data. Exception thrown: ", str(e))))
 
@@ -320,7 +358,7 @@ class extract:
         try:
             # Finn felleskostnader
             felleskostnad_div = prisdetaljer_list.find('div', attrs={'data-testid': 'pricing-common-monthly-cost'})
-            self.felleskostnader = int(''.join(filter(str.isdigit, felleskostnad_div.find('dd').text.strip())))
+            DBData["Felleskostnader"] = int(''.join(filter(str.isdigit, felleskostnad_div.find('dd').text.strip())))
         except Exception as e:
             logging.info("".join((self.progress, " - ", "Error extracting 'felleskostnader'. Exception thrown: ", str(e))))
 
@@ -328,14 +366,14 @@ class extract:
         try:
             # Finn kommunale avgifter
             kommunale_avgifter_div = prisdetaljer_list.find('div', attrs={'data-testid': 'pricing-municipal-fees'})
-            self.kommunaleAvgifter = int(''.join(filter(str.isdigit, kommunale_avgifter_div.find('dd').text.strip())))
+            DBData["KommunaleAvgifter"] = int(''.join(filter(str.isdigit, kommunale_avgifter_div.find('dd').text.strip())))
         except Exception as e:
             logging.info("".join((self.progress, " - ", "Error extracting 'kommunale avgifter'. Exception thrown: ", str(e))))
 
         #Finn URL til eierhistorie siden
         try:
             eierhistorie_div = prisdetaljer_section.find('div', attrs={'data-testid': 'pricing-links'})
-            self.eierhistorie_URL = "".join(("https://www.finn.no", eierhistorie_div.find('a', attrs={'data-testid': 'ownership-history-link'}, href=True)['href']))
+            eierhistorie_URL = "".join(("https://www.finn.no", eierhistorie_div.find('a', attrs={'data-testid': 'ownership-history-link'}, href=True)['href']))
             
         except Exception as e:
             logging.info("".join((self.progress, " - ", "Error extracting URL for ownership history. Exception thrown: ", str(e))))
@@ -351,70 +389,70 @@ class extract:
         #Finn boligtype
         try:
             boligtype_div = nokkelinfo_list.find('div', attrs={'data-testid': 'info-property-type'})
-            self.boligtype = boligtype_div.find('dd').text.strip()
+            DBData["Boligtype"] = boligtype_div.find('dd').text.strip()
         except Exception as e:
             logging.info("".join((self.progress, " - ", "Error finding 'Boligtype'. Exception thrown: ", str(e))))
 
         #Finn eierform
         try:
             eierform_div = nokkelinfo_list.find('div', attrs={'data-testid': 'info-ownership-type'})
-            self.eierform = eierform_div.find('dd').text.strip()
+            DBData["Eierform"] = eierform_div.find('dd').text.strip()
         except Exception as e:
             logging.info("".join((self.progress, " - ", "Error finding 'eierform'. Exception thrown: ", str(e))))
 
         #Finn antall soverom
         try:
             soverom_div = nokkelinfo_list.find('div', attrs={'data-testid': 'info-bedrooms'})
-            self.soverom = soverom_div.find('dd').text.strip()
+            DBData["AntallSoverom"] = soverom_div.find('dd').text.strip()
         except Exception as e:
             logging.info("".join((self.progress, " - ", "Error finding 'Antall soverom'. Exception thrown: ", str(e))))
 
         #Finn prim�rrom
         try:
             primerrom_div = nokkelinfo_list.find('div', attrs={'data-testid': 'info-primary-area'})
-            self.primerrom = int(primerrom_div.find('dd').text.strip()[:-2])
+            DBData["ArealPrimerrom"] = int(primerrom_div.find('dd').text.strip()[:-2])
         except Exception as e:
             logging.info("".join((self.progress, " - ", "Error finding 'Primærrom'. Exception thrown: ", str(e))))
 
         #Finn bruksareal
         try:
             bruksareal_div = nokkelinfo_list.find('div', attrs={'data-testid': 'info-usable-area'})
-            self.bruksareal = int(bruksareal_div.find('dd').text.strip()[:-2])
+            DBData["Bruksareal"] = int(bruksareal_div.find('dd').text.strip()[:-2])
         except Exception as e:
             logging.info("".join((self.progress, " - ", "Error finding 'Bruksareal'. Exception thrown: ", str(e))))
 
         #Finn etasje
         try:
             etasje_div = nokkelinfo_list.find('div', attrs={'data-testid': 'info-floor'})
-            self.etasje = int(''.join(filter(str.isdigit, etasje_div.find('dd').text.strip())))
+            DBData["Etasje"] = int(''.join(filter(str.isdigit, etasje_div.find('dd').text.strip())))
         except Exception as e:
             logging.info("".join((self.progress, " - ", "Error finding 'Etasje'. Exception thrown: ", str(e))))
 
         #Finn bygge�r
         try:
             byggear_div = nokkelinfo_list.find('div', attrs={'data-testid': 'info-construction-year'})
-            self.byggear = int(''.join(filter(str.isdigit, byggear_div.find('dd').text.strip())))
+            DBData["Byggear"] = int(''.join(filter(str.isdigit, byggear_div.find('dd').text.strip())))
         except Exception as e:
             logging.info("".join((self.progress, " - ", "Error finding 'Byggeår'. Exception thrown: ", str(e))))
 
         #Finn energimerke
         try:
             energimerke_div = nokkelinfo_list.find('div', attrs={'data-testid': 'energy-label'})
-            self.energimerke = energimerke_div.find('dd').text.strip()
+            DBData["Energimerke"] = energimerke_div.find('dd').text.strip()
         except Exception as e:
             logging.info("".join((self.progress, " - ", "Error finding 'Energimerke'. Exception thrown: ", str(e))))
 
         #Finn antall rom
         try:
             rom_div = nokkelinfo_list.find('div', attrs={'data-testid': 'info-rooms'})
-            self.rom = int(''.join(filter(str.isdigit, rom_div.find('dd').text.strip())))
+            DBData["AntallRom"] = int(''.join(filter(str.isdigit, rom_div.find('dd').text.strip())))
         except Exception as e:
             logging.info("".join((self.progress, " - ", "Error finding 'Antall rom'. Exception thrown: ", str(e))))
 
         #Finn Tomteareal
         try:
             plotArea_div = nokkelinfo_list.find('div', attrs={'data-testid': 'info-plot-area'})
-            self.plotArea = int(''.join(filter(str.isdigit, plotArea_div.find('dd').text.strip()[:-9])))
+            DBData["Tomteareal"] = int(''.join(filter(str.isdigit, plotArea_div.find('dd').text.strip()[:-9])))
         except Exception as e:
             logging.info("".join((self.progress, " - ", "Error finding 'Tomteareal'. Exception thrown: ", str(e))))
 
@@ -432,13 +470,13 @@ class extract:
             for i in facilities:
                 facility = i.text.strip()
                 if str(facility) == 'Balkong/Terrasse':
-                    self.balkong = 'Ja'
+                    DBData["Balkong"] = 'Ja'
                 elif str(facility) == 'Garasje/P-plass':
-                    self.parkering = 'Ja'
-            if self.balkong == None:
-                self.balkong = 'Nei'
-            if self.parkering == None:
-                self.parkering = 'Nei'
+                    DBData["Parkering"] = 'Ja'
+            if DBData["Balkong"] == None:
+                DBData["Balkong"] = 'Nei'
+            if DBData["Parkering"] == None:
+                DBData["Parkering"] = 'Nei'
         except Exception as e:
             logging.info("".join((self.progress, " - ", "Error extracting balcony and parking data. Exception thrown: ", str(e))))
 
@@ -446,17 +484,14 @@ class extract:
         try:
             description_section = tag3.find('section', attrs={'data-testid': 'about-property'})
             description_div = description_section.find('div', class_={'description-area whitespace-pre-wrap'})
-            self.beskrivelse = description_div.get_text("\n", strip=True)
+            DBData["Beskrivelse"] = description_div.get_text("\n", strip=True)
         except Exception as e:
             logging.info("".join((self.progress, " - ", "Error finding main tags for 'Fasiliteter'. Exception thrown: ", str(e))))
 
-        del adpage
-
-
-    def extract_ownership_history(self, URL):
+        #Extract ownership history
         #Parse page
         try:
-            Get_page = SESSION.get(URL)
+            Get_page = SESSION.get(eierhistorie_URL)
             ownership_history_page = BeautifulSoup(Get_page.content, 'html.parser')
         except Exception as e:
             logging.info("".join((self.progress, " - ", "Error parsing ownership history page. Exception thrown: ", str(e))))
@@ -474,9 +509,13 @@ class extract:
                 kjopsdato = tag5[0].text.strip()
                 kjopssum = int(''.join(filter(str.isdigit, tag5[len(tag5)-1].text.strip())))
                 kjopsdata = [kjopsdato, kjopssum]
-                self.Tidligerekjop.append(kjopsdata)
+                DBData["Tidligerekjøp"].append(kjopsdata)
         except Exception as e:
             logging.info("".join((self.progress, " - ", "Error extracting ownership history. Exception thrown: ", str(e))))
+
+        del adpage, ownership_history_page
+
+        return DBData
 
 main()
 
