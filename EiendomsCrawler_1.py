@@ -87,6 +87,8 @@ def main():
 
                     except Exception as e:
                         logging.error(f"{i} - Error in worker: {e}")
+                    finally:
+                        gc.collect()
             
 
                     # Force Python to clear circular references regularly
@@ -245,16 +247,6 @@ def store(Boligdata, progress, configData):
 
 
 def extract(URL, configData, progress):
-
-    #all values
-    #def __init__(self, URL, configData, progress):
-    #self.URL = URL
-    #self.progress = progress
-
-    web_page = SESSION.get(URL, timeout=10)
-    adpage = BeautifulSoup(web_page.content, "html.parser")
-    web_page.close()
-
 
     def adpage_exists(adpage):
         
@@ -504,11 +496,16 @@ def extract(URL, configData, progress):
             logging.info("".join((progress, " - ", "Error extracting ownership history. Exception thrown: ", str(e))))
 
         adpage.decompose()
-        ownership_history_page.decompose()
+        if 'ownership_history_page' in dir():
+            ownership_history_page.decompose()
         del adpage, ownership_history_page
 
         return DBData
     
+    web_page = SESSION.get(URL, timeout=10)
+    adpage = BeautifulSoup(web_page.content, 'html.parser')
+    web_page.close()
+
     if(adpage_exists(adpage)): #returns true if the ad exists
         Boligdata = extract_adpage(adpage)
         
@@ -517,7 +514,6 @@ def extract(URL, configData, progress):
         store(Boligdata, progress, configData)
 
         return
-    del adpage
     return
 
 main()
