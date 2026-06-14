@@ -475,14 +475,9 @@ def extract(URL, configData, progress):
                 kjopssum = int(''.join(filter(str.isdigit, tag5[len(tag5)-1].text.strip())))
                 kjopsdata = [kjopsdato, kjopssum]
                 DBData["Tidligerekjøp"].append(kjopsdata)
+                ownership_history_page.decompose()
         except Exception as e:
             logging.info("".join((progress, " - ", "Error extracting ownership history. Exception thrown: ", str(e))))
-
-        adpage.decompose()
-        try:
-            ownership_history_page.decompose()
-        except UnboundLocalError:
-            pass
 
         return DBData
     
@@ -491,12 +486,14 @@ def extract(URL, configData, progress):
 
     if(adpage_exists(adpage)): #returns true if the ad exists
         Boligdata = extract_adpage(adpage)
-        
+
+        adpage.decompose()
         del adpage
         #Store data if ad exists, passes the current instance to store class
         store(Boligdata, progress, configData)
 
         return
+    adpage.decompose()
     return
 
 main()
