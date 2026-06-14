@@ -40,6 +40,16 @@ SESSION.mount("https://", HTTPAdapter(max_retries=_retry, pool_connections=80, p
 CONFIG_LOCK = threading.Lock()
 MAX_WORKERS = 80
 
+#Troubleshoot
+import tracemalloc
+import psutil, os
+
+tracemalloc.start()
+
+def log_memory(label=""):
+    process = psutil.Process(os.getpid())
+    mb = process.memory_info().rss / 1024 / 1024
+    logging.warning(f"RSS memory {label}: {mb:.1f} MB")
 
 def main():
     start_time = time.time()
@@ -86,6 +96,12 @@ def main():
                         logging.error(f"{i} - Error in worker: {e}")
                     #finally:
                     #    gc.collect()
+    
+                    if hash(i) % 200 == 0:  # ~0.5% of workers
+                        log_memory(str(i))
+                        snapshot = tracemalloc.take_snapshot()
+                        for stat in snapshot.statistics('lineno')[:5]:
+                            logging.warning(f"MEMORY: {stat}")
                 
                 with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
                     count = 0
