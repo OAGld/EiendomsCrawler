@@ -479,9 +479,10 @@ def extract(URL, configData, progress):
             logging.info("".join((progress, " - ", "Error extracting ownership history. Exception thrown: ", str(e))))
 
         adpage.decompose()
-        if 'ownership_history_page' in dir():
+        try:
             ownership_history_page.decompose()
-        del adpage, ownership_history_page
+        except UnboundLocalError:
+            pass
 
         return DBData
     
