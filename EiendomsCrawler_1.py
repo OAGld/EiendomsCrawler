@@ -13,6 +13,9 @@ import re
 import Auxiliary
 import json
 import gc
+# Troubleshooting
+import tracemalloc
+import os, psutil
 
 # TODO
 # - Check to see if its any point in using mysql.connector.connect in every thread that tries to access the database
@@ -41,6 +44,7 @@ SESSION.mount("https://", HTTPAdapter(max_retries=_retry, pool_connections=80, p
 CONFIG_LOCK = threading.Lock()
 MAX_WORKERS = 80
 
+tracemalloc.start()
 
 def main():
     start_time = time.time()
@@ -89,19 +93,27 @@ def main():
                         logging.error(f"{i} - Error in worker: {e}")
                     finally:
                         gc.collect()
-            
 
-                    # Force Python to clear circular references regularly
-                    if random.random() < 0.1: # 10% chance per thread execution to keep it lightweight
-                        gc.collect()
+                    # Log memory snapshot every ~500 workers
+                    if random.random() < 0.002:
+                        snapshot = tracemalloc.take_snapshot()
+                        top = snapshot.statistics('lineno')[:5]
+                        for stat in top:
+                            logging.warning(f"MEMORY: {stat}")
                 
                 with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
-                    futures = [executor.submit(worker, i) for i in range(start, finish + 1)]
                     count = 0
-                    for f in tqdm(as_completed(futures), total=len(futures)):
+                    for _ in tqdm(executor.map(worker, range(start, finish + 1)), total=finish - start + 1):
                         count += 1
                         if count >= finish - start + 1:
                             finished = True
+                    
+                    #futures = [executor.submit(worker, i) for i in range(start, finish + 1)]
+                    #count = 0
+                    #for f in tqdm(as_completed(futures), total=len(futures)):
+                    #    count += 1
+                    #    if count >= finish - start + 1:
+                    #        finished = True
 
         if(not finished):
             time.sleep(6)
@@ -502,9 +514,8 @@ def extract(URL, configData, progress):
 
         return DBData
     
-    web_page = SESSION.get(URL, timeout=10)
-    adpage = BeautifulSoup(web_page.content, 'html.parser')
-    web_page.close()
+    with SESSION.get(URL, timeout=10, stream=False) as web_page:
+        adpage = BeautifulSoup(web_page.content, "html.parser")
 
     if(adpage_exists(adpage)): #returns true if the ad exists
         Boligdata = extract_adpage(adpage)

@@ -35,7 +35,7 @@ def parse_norwegian_date(s):
 def initialise():
 
     #Set basic configuration for logging
-    logging.basicConfig(filename="".join((os.path.dirname(os.path.realpath(__file__)), '/logfile.log')), encoding='utf-8', format='%(levelname)s: %(asctime)s - %(message)s', datefmt='%m-%d-%Y %I:%M:%S', level=logging.INFO)
+    logging.basicConfig(filename="".join((os.path.dirname(os.path.realpath(__file__)), '/logfile.log')), encoding='utf-8', format='%(levelname)s: %(asctime)s - %(message)s', datefmt='%m-%d-%Y %I:%M:%S', level=logging.WARNING)
 
     #get data from INI file
     configData = configparser.ConfigParser()
@@ -54,11 +54,11 @@ def initialise():
         start = progression
 
     #Get all URLs from URL file
-    file = open(URLfile,'r')
-    ad_list = []
-    for i in file.readlines():
-        i = i.rstrip('\r\n')
-        ad_list.append(i)
+    with open(URLfile, 'r') as file:
+        ad_list = []
+        for i in file.readlines():
+            i = i.rstrip('\r\n')
+            ad_list.append(i)
 
     return useFile, ad_list, start, finish, configData
 
