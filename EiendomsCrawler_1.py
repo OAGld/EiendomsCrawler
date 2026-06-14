@@ -11,7 +11,7 @@ from urllib3.util.retry import Retry
 import re
 import Auxiliary
 import json
-import gc
+import random
 
 # TODO
 # - Check to see if its any point in using mysql.connector.connect in every thread that tries to access the database
@@ -39,7 +39,7 @@ SESSION.mount("https://", HTTPAdapter(max_retries=_retry, pool_connections=80, p
 
 CONFIG_LOCK = threading.Lock()
 MAX_WORKERS = 80
-sem = threading.Semaphore(1000)
+sem = threading.Semaphore(100000)
 
 def main():
     start_time = time.time()
@@ -81,11 +81,13 @@ def main():
 
                         # Extract and store data
                         extract(URL, configData, str(i))
+                        time.sleep(random.uniform(0.01, 0.05))
 
                     except Exception as e:
                         logging.error(f"{i} - Error in worker: {e}")
                     finally:
                         sem.release()
+
                 
                 with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
                     #count = 0
