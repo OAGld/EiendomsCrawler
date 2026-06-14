@@ -8,14 +8,10 @@ import logging
 from tqdm import tqdm
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
-import random
 import re
 import Auxiliary
 import json
 import gc
-# Troubleshooting
-import tracemalloc
-import os, psutil
 
 # TODO
 # - Check to see if its any point in using mysql.connector.connect in every thread that tries to access the database
@@ -44,7 +40,6 @@ SESSION.mount("https://", HTTPAdapter(max_retries=_retry, pool_connections=80, p
 CONFIG_LOCK = threading.Lock()
 MAX_WORKERS = 80
 
-tracemalloc.start()
 
 def main():
     start_time = time.time()
@@ -87,19 +82,10 @@ def main():
                         # Extract and store data
                         extract(URL, configData, str(i))
 
-                        #time.sleep(random.uniform(0.005, 0.01))
-
                     except Exception as e:
                         logging.error(f"{i} - Error in worker: {e}")
                     finally:
                         gc.collect()
-
-                    # Log memory snapshot every ~500 workers
-                    if random.random() < 0.002:
-                        snapshot = tracemalloc.take_snapshot()
-                        top = snapshot.statistics('lineno')[:5]
-                        for stat in top:
-                            logging.warning(f"MEMORY: {stat}")
                 
                 with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
                     count = 0
@@ -108,19 +94,11 @@ def main():
                         if count >= finish - start + 1:
                             finished = True
                     
-                    #futures = [executor.submit(worker, i) for i in range(start, finish + 1)]
-                    #count = 0
-                    #for f in tqdm(as_completed(futures), total=len(futures)):
-                    #    count += 1
-                    #    if count >= finish - start + 1:
-                    #        finished = True
-
         if(not finished):
             time.sleep(6)
             connectionTries += 1
             if (connectionTries == 10):
-                with CONFIG_LOCK:
-                    logging.error("".join((configData.get("progress", "progression"), " - ", "Unable to connect to 'www.finn.no', exiting program.")))
+                logging.error("".join((configData.get("progress", "progression"), " - ", "Unable to connect to 'www.finn.no', exiting program.")))
                 finished = True
 
     logging.info("Process finished --- %s seconds ---" % (time.time() - start_time))
@@ -136,13 +114,6 @@ def connected():
         return False 
  
 def store(Boligdata, progress, configData):
-
-    #def __init__(self, Boligdata, progress, configData):
-    #    self.Boligdata = Boligdata
-    #    self.progress = progress
-    #    self.writeToDatabase(Boligdata, progress, configData)
-
-    #def writeToDatabase(self, Boligdata, progress, configData):
 
     COLUMNS = [
         ("Finnkode", "BIGINT"),

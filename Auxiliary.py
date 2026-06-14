@@ -35,7 +35,7 @@ def parse_norwegian_date(s):
 def initialise():
 
     #Set basic configuration for logging
-    logging.basicConfig(filename="".join((os.path.dirname(os.path.realpath(__file__)), '/logfile.log')), encoding='utf-8', format='%(levelname)s: %(asctime)s - %(message)s', datefmt='%m-%d-%Y %I:%M:%S', level=logging.WARNING)
+    logging.basicConfig(filename="".join((os.path.dirname(os.path.realpath(__file__)), '/logfile.log')), encoding='utf-8', format='%(levelname)s: %(asctime)s - %(message)s', datefmt='%m-%d-%Y %I:%M:%S', level=logging.INFO)
 
     #get data from INI file
     configData = configparser.ConfigParser()
