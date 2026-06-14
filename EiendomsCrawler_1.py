@@ -39,17 +39,7 @@ SESSION.mount("https://", HTTPAdapter(max_retries=_retry, pool_connections=80, p
 
 CONFIG_LOCK = threading.Lock()
 MAX_WORKERS = 80
-
-#Troubleshoot
-import tracemalloc
-import psutil, os
-
-tracemalloc.start()
-
-def log_memory(label=""):
-    process = psutil.Process(os.getpid())
-    mb = process.memory_info().rss / 1024 / 1024
-    logging.warning(f"RSS memory {label}: {mb:.1f} MB")
+sem = threading.Semaphore(1000)
 
 def main():
     start_time = time.time()
@@ -94,22 +84,19 @@ def main():
 
                     except Exception as e:
                         logging.error(f"{i} - Error in worker: {e}")
-                    #finally:
-                    #    gc.collect()
-    
-                    if hash(i) % 200 == 0:  # ~0.5% of workers
-                        log_memory(str(i))
-                        snapshot = tracemalloc.take_snapshot()
-                        for stat in snapshot.statistics('lineno')[:5]:
-                            logging.warning(f"MEMORY: {stat}")
+                    finally:
+                        sem.release()
                 
                 with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
-                    count = 0
-                    for _ in tqdm(executor.map(worker, range(start, finish + 1)), total=finish - start + 1):
-                        count += 1
-                        if count >= finish - start + 1:
-                            finished = True
-                    
+                    #count = 0
+                    for i in tqdm(range(start, finish + 1), total=finish - start + 1):
+                        sem.acquire()
+                        executor.submit(worker, i)
+                        #count += 1
+                        #if count >= finish - start + 1:
+                        #    finished = True
+                    finished = True
+
         if(not finished):
             time.sleep(6)
             connectionTries += 1
