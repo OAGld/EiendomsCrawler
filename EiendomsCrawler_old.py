@@ -1,0 +1,445 @@
+import requests
+from bs4 import BeautifulSoup
+import mysql.connector
+import configparser
+import time
+import threading
+from concurrent.futures import ThreadPoolExecutor
+import logging
+from tqdm import tqdm
+import os
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
+import random
+import re
+
+#TODO:
+#   Legg til om strøm og internett er inkludert
+
+#info
+
+# GLOBALS
+SESSION = requests.Session()
+SESSION.headers.update({
+    "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
+    "Accept-Language": "nb-NO,nb;q=0.9,en;q=0.8",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+    "Connection": "keep-alive",
+})
+
+_retry = Retry(
+    total=5,
+    connect=5,
+    read=5,
+    backoff_factor=1.0,
+    status_forcelist=[429, 500, 502, 503, 504],
+    allowed_methods=["GET"],
+)
+
+SESSION.mount("https://", HTTPAdapter(max_retries=_retry, pool_connections=10, pool_maxsize=10))
+
+THREAD_LIMIT = threading.BoundedSemaphore(3)
+
+
+def main():
+    start_time = time.time()
+
+    #get parameters from INI file
+    useFile, ad_list, start, finish, configData = initialise()
+
+    #run program until internet connection is lost or the program finishes
+    connectionTries = 0
+    finished = False
+    while(not finished):
+
+        while(connected() & (not finished)):
+            connectionTries = 0
+
+            #Loop through all defined ads and ads to database
+            if(useFile == "True"):
+                index = 0
+                for i in tqdm (ad_list, desc="Progress"):
+                    i = i.rstrip('\r')
+
+                    #Append progression to config file
+                    appendProgress(configData, useFile, i, None)
+
+                    BoligInstance = extract(i, configData, str(index))
+                    index += 1
+                    if (index == len(ad_list)):
+                        finished = True
+
+            else:
+                for i in tqdm (range(start, finish+1), desc="Progress"):
+                    URL = "".join(("https://www.finn.no/realestate/lettings/ad.html?finnkode=", str(i)))
+
+                    #Append progression to config file
+                    appendProgress(configData, useFile, URL, i)
+
+                    progress = configData.get("progress", "progression")
+                    def _worker(url, cfg, prog):
+                        with THREAD_LIMIT:
+                            extract(url, cfg, prog)
+
+                    newThread = threading.Thread(target=_worker, args=(URL, configData, progress))
+                    newThread.start()
+
+                    if (i == finish):
+                        finished = True
+                    #Pause to stop Finn.no from refusing connection
+                    time.sleep(random.uniform(0.05, 0.1))
+
+        if(not finished):
+            time.sleep(6)
+            connectionTries += 1
+            if (connectionTries == 10):
+                logging.error("".join((configData.get("progress", "progression"), " - ", "Unable to connect to 'www.finn.no', exiting program. Exception thrown: ", str(e))))
+                print("".join((str(datetime.now()), "\nUnable to connect to 'www.finn.no', exiting program. Exception thrown: ", str(e), "\n")))
+                finished = True
+
+    #newThread.join()
+    logging.info("Process finished --- %s seconds ---" % (time.time() - start_time))
+    print("Process finished --- %s seconds ---" % (time.time() - start_time))
+
+def appendProgress(configData, useFile, URL, i):
+    try:
+        #Write progression to INI file
+        if (useFile == "False"):
+            configData["progress"]["progression"] = str(i)
+        configData["progress"]["currentURL"] = URL
+
+        with open("".join((os.path.dirname(os.path.realpath(__file__)), '/config.ini')), 'w') as conf:
+            configData.write(conf)
+    except Exception as e:
+        logging.error(i, " - ", "Error getting data form ini file or URL file. Exception thrown: ", str(e))
+
+def connected():
+    try:
+        response = SESSION.get("https://www.finn.no", timeout=5)
+        logging.info("connected to 'www.Finn.no'")
+        return True
+    except (requests.ConnectionError, requests.exceptions.SSLError):
+        logging.info("Unable to connect to 'www.Finn.no'")
+        return False 
+
+def initialise():
+
+    #Set basic configuration for logging
+    logging.basicConfig(filename="".join((os.path.dirname(os.path.realpath(__file__)), '/logfile.log')), encoding='utf-8', format='%(levelname)s: %(asctime)s - %(message)s', datefmt='%m-%d-%Y %I:%M:%S', level=logging.INFO)
+
+    #get data from INI file
+    configData = configparser.ConfigParser()
+    with open("".join((os.path.dirname(os.path.realpath(__file__)), '/config.ini')),"r") as configFile:
+        configData.read_file(configFile)
+        useFile = configData.get("URLfile", "usefile")
+        URLfile = configData.get("URLfile", "urlfile")
+        start = int(configData.get("finnkoder", "start"))
+        finish = int(configData.get("finnkoder", "end"))
+        continueProgression = configData.get("progress", "continue")
+        progression = int(configData.get("progress", "progression"))
+    configFile.close()
+
+    #Set start point to where the program stopped last run
+    if (continueProgression == "True"):
+        start = progression
+
+    #Get all URLs from URL file
+    file = open(URLfile,'r')
+    ad_list = []
+    for i in file.readlines():
+        i = i.rstrip('\r\n')
+        ad_list.append(i)
+
+    return useFile, ad_list, start, finish, configData
+ 
+class store:
+
+    def __init__(self, Bolig, progress):
+        #Bolig is the inherited instance
+        self.Bolig = Bolig
+        self.progress = progress
+        store.writeToDatabase(self, Bolig)
+
+    def writeToDatabase(self, Bolig):
+        COLUMNS = [
+            ("Finnkode", "BIGINT", lambda b: int(b.URL.split("finnkode=")[1].split("&")[0])),
+            ("Link", "VARCHAR(255)", lambda b: b.URL),
+            ("Adresse", "VARCHAR(255)", lambda b: getattr(b, "adresse", None)),
+            ("Leiepris", "INT", lambda b: getattr(b, "leiepris", None)),
+            ("Depositum", "INT", lambda b: getattr(b, "depositum", None)),
+            ("Boligtype", "VARCHAR(80)", lambda b: getattr(b, "boligtype", None)),
+            ("AntallSoverom", "INT", lambda b: getattr(b, "soverom", None)),
+            ("ArealPrimerrom", "INT", lambda b: getattr(b, "primerrom", None)),
+            ("Bruksareal", "INT", lambda b: getattr(b, "bruksareal", None)),
+            ("Etasje", "VARCHAR(255)", lambda b: getattr(b, "etasje", None)),
+            ("Energimerke", "VARCHAR(255)", lambda b: getattr(b, "energimerke", None)),
+            ("AntallRom", "INT", lambda b: getattr(b, "rom", None)),
+            ("Parkering", "VARCHAR(5)", lambda b: getattr(b, "parkering", None)),
+            ("Balkong", "VARCHAR(5)", lambda b: getattr(b, "balkong", None)),
+            ("Tomteareal", "VARCHAR(255)", lambda b: getattr(b, "plotArea", None)),
+            ("Standard", "VARCHAR(255)", lambda b: getattr(b, "standard", None)),
+            ("Postnummer", "VARCHAR(10)", lambda b: getattr(b, "postnummer", None)),
+            ("Poststed", "VARCHAR(80)", lambda b: getattr(b, "poststed", None)),
+            ("UtleidMerke", "VARCHAR(255)", lambda b: getattr(b, "utleid", None)),
+            ("SistEndret", "VARCHAR(255)", lambda b: getattr(b, "sistEndret", None)),
+        ]
+
+        table = "data"
+        col_names = [n for n, _, _ in COLUMNS]
+        col_defs  = ", ".join(f"`{n}` {t}" for n, t, _ in COLUMNS)
+        #Create table with unique constraint
+        create_sql = (
+            f"CREATE TABLE IF NOT EXISTS `{table}` ("
+            f"`id` BIGINT NOT NULL AUTO_INCREMENT, "
+            f"{col_defs}, "
+            f"PRIMARY KEY (`id`), "
+            f"UNIQUE KEY `uniq_finnkode_sistendret` (`Finnkode`, `SistEndret`)"
+            f")"
+        )
+        insert_sql = (
+            f"INSERT IGNORE INTO `{table}` "
+            f"({', '.join(f'`{c}`' for c in col_names)}) "
+            f"VALUES ({', '.join(['%s']*len(col_names))})"
+        )
+        values = tuple(get(Bolig) for _, _, get in COLUMNS)
+
+        mydb = mycursor = None
+        try:
+            mydb = mysql.connector.connect(
+                host=Bolig.configData.get("mysql", "host"),
+                user=Bolig.configData.get("mysql", "user"),
+                password=Bolig.configData.get("mysql", "password"),
+                database=Bolig.configData.get("mysql", "database"),
+            )
+            mycursor = mydb.cursor()
+            mycursor.execute(create_sql)
+            mycursor.execute(insert_sql, values)
+            mydb.commit()
+            logging.info(f"{self.progress} - {int(Bolig.URL.split("finnkode=")[1].split("&")[0])} successfully added to table.")
+        except Exception as e:
+            logging.error(f"{self.progress} - Error when writing to database: {e}")
+        finally:
+            if mycursor: mycursor.close()
+            if mydb: mydb.close()
+
+
+class extract:
+
+    #all values
+    def __init__(self, URL, configData, progress):
+        self.URL = URL
+        self.adresse = None
+        self.postnummer = None
+        self.poststed = None
+        self.leiepris = None
+        self.depositum = None
+        self.boligtype = None
+        self.soverom = None
+        self.primerrom = None
+        self.bruksareal = None
+        self.etasje = None
+        self.energimerke = None
+        self.rom = None
+        self.parkering = None
+        self.balkong = None
+        self.plotArea = None
+        self.configData = configData
+        self.progress = progress
+        self.sistEndret = None
+        self.utleid = None
+        self.standard = None
+        if(extract.adpage_exists(self, URL)): #returns true if the ad exists
+            extract.extract_adpage(self, URL)
+
+            #Store data if ad exists, passes the current instance to store class
+            store(self, progress)
+
+            return
+        return
+
+    def adpage_exists(self, URL):
+        
+        try:
+            r = SESSION.get(URL, timeout=10)
+            adpage = BeautifulSoup(r.content, "html.parser")
+
+            # Positive check: a real ad page contains the detailed section or FINN-kode text.
+            exists = (
+                adpage.find("section", attrs={"aria-label": "Detaljert informasjon om bolig"}) is not None
+                or adpage.find(string=re.compile(r"\bFINN-kode\b", re.I)) is not None
+            )
+            
+            return exists
+        except Exception as e:
+            logging.error("".join((self.progress, " - ", "Error checking ad page existence. Exception thrown: ", str(e))))
+
+    def extract_adpage(self, URL):
+
+        #Parse page
+        try:
+            session = requests.Session()
+            Get_page = session.get(URL)
+            adpage = BeautifulSoup(Get_page.content, 'html.parser')
+        except Exception as e:
+            logging.error("".join((self.progress, " - ", "Error with GET request or parsing page. Exception thrown: ", str(e))))
+
+
+        #Find tags containing all relevant data
+        try:
+            tag1 = adpage.find('body')
+            tag2 = tag1.find('main')
+            tag3 = tag2.find('section', attrs={'aria-label': 'Detaljert informasjon om bolig'})
+        except Exception as e:
+            logging.error("".join((self.progress, " - ", "Error getting main tags for extraction. Exception thrown: ", str(e))))
+
+        #Find 'utleid' symbol
+        try:
+            utleid_tag = tag3.find(attrs={"data-testid": "object-details"})
+
+            utleid = utleid_tag.find(class_ = '!text-m mb-24 py-4 px-8 border-0 rounded-4 text-xs inline-flex bg-[--w-color-badge-warning-background] s-text').text.strip()
+            self.utleid = utleid
+        except Exception as e:
+            logging.info("".join((self.progress, " - ", "Error extracting 'utleid'. Exception thrown: ", str(e))))        
+
+
+        #Find sist endret
+        try:
+            SistEndretMain = tag2.find('section', attrs={'aria-labelledby': 'ad-info-heading'})
+            SistEndretList = SistEndretMain.findAll('tr')
+            SistEndret = SistEndretList[1].find('td')
+            self.sistEndret = SistEndret.text.strip()
+        except Exception as e:
+            logging.info("".join((self.progress, " - ", "Error extracting 'sist endret dato'. Exception thrown: ", str(e))))
+
+        #Extract address
+        try:
+            address_section = tag3.find('section', attrs={'aria-label': 'Tittel'})
+            address_a = address_section.find(attrs={'data-testid': 'map-link'})
+            self.adresse = address_a.find('span', attrs={'data-testid': 'object-address'}).text.strip()
+        except Exception as e:
+            logging.info("".join((self.progress, " - ", "Error extracting address. Exception thrown: ", str(e))))
+
+        #Extract postcode and post area
+        try:
+            if self.adresse:
+                # Expected format: "BAKKETUNGATA 5, 2406 Elverum"
+                after_comma = self.adresse.split(",")[-1].strip()
+                parts = after_comma.split(maxsplit=1)
+                if len(parts) == 2:
+                    self.postnummer, self.poststed = parts
+        except Exception as e:
+            logging.info("".join((self.progress, " - ", "Error extracting postcode/post area. Exception thrown: ", str(e))))
+
+
+        #Extract price info
+        try:
+            prisdetaljer_section = tag3.find('section', attrs={'aria-label': 'Prisdetaljer'})
+            prisdetaljer_list = prisdetaljer_section.find('dl')
+
+            #Finn leiepris
+            leiepris_section = prisdetaljer_list.find('div', attrs={'data-testid': 'pricing-common-monthly-cost'})
+            leiepris_raw = leiepris_section.find('dd', class_="m-0 font-bold text-28").text.strip()
+            self.leiepris = int(''.join(filter(str.isdigit, leiepris_raw)))
+
+            #Finn depositum           
+            depositum_div = prisdetaljer_list.find('div', attrs={'data-testid': 'pricing-deposit'})
+            depositum_raw = depositum_div.find('dd').text.strip()
+            self.depositum = int(''.join(filter(str.isdigit, depositum_raw)))
+
+        except Exception as e:
+            logging.info("".join((self.progress, " - ", "Error extracting price and cost data. Exception thrown: ", str(e))))
+
+        #extract key info
+        #Finn n�kkelinfo hoved tags
+        try:
+            nokkelinfo_section = tag3.find('section', attrs={'data-testid': 'key-info'})
+            nokkelinfo_list = nokkelinfo_section.find('dl')
+        except Exception as e:
+            logging.info("".join((self.progress, " - ", "Error extracting main tags for 'key info'. Exception thrown: ", str(e))))
+
+        #Finn boligtype
+        try:
+            boligtype_div = nokkelinfo_list.find('div', attrs={'data-testid': 'info-property-type'})
+            self.boligtype = boligtype_div.find('dd').text.strip()
+        except Exception as e:
+            logging.info("".join((self.progress, " - ", "Error finding 'Boligtype'. Exception thrown: ", str(e))))
+
+        #Finn antall soverom
+        try:
+            soverom_div = nokkelinfo_list.find('div', attrs={'data-testid': 'info-bedrooms'})
+            self.soverom = soverom_div.find('dd').text.strip()
+        except Exception as e:
+            logging.info("".join((self.progress, " - ", "Error finding 'Antall soverom'. Exception thrown: ", str(e))))
+
+        #Finn prim�rrom
+        try:
+            primerrom_div = nokkelinfo_list.find('div', attrs={'data-testid': 'info-primary-area'})
+            self.primerrom = int(primerrom_div.find('dd').text.strip()[:-2])
+        except Exception as e:
+            logging.info("".join((self.progress, " - ", "Error finding 'Primærrom'. Exception thrown: ", str(e))))
+
+        #Finn bruksareal
+        try:
+            bruksareal_div = nokkelinfo_list.find('div', attrs={'data-testid': 'info-usable-area'})
+            self.bruksareal = int(bruksareal_div.find('dd').text.strip()[:-2])
+        except Exception as e:
+            logging.info("".join((self.progress, " - ", "Error finding 'Bruksareal'. Exception thrown: ", str(e))))
+
+        #Finn etasje
+        try:
+            etasje_div = nokkelinfo_list.find('div', attrs={'data-testid': 'info-floor'})
+            self.etasje = int(''.join(filter(str.isdigit, etasje_div.find('dd').text.strip())))
+        except Exception as e:
+            logging.info("".join((self.progress, " - ", "Error finding 'Etasje'. Exception thrown: ", str(e))))
+
+        #Finn energimerke
+        try:
+            energimerke_div = nokkelinfo_list.find('div', attrs={'data-testid': 'energy-label'})
+            self.energimerke = energimerke_div.find('dd').text.strip()
+        except Exception as e:
+            logging.info("".join((self.progress, " - ", "Error finding 'Energimerke'. Exception thrown: ", str(e))))
+
+        #Finn antall rom
+        try:
+            rom_div = nokkelinfo_list.find('div', attrs={'data-testid': 'info-rooms'})
+            self.rom = int(''.join(filter(str.isdigit, rom_div.find('dd').text.strip())))
+        except Exception as e:
+            logging.info("".join((self.progress, " - ", "Error finding 'Antall rom'. Exception thrown: ", str(e))))
+
+        #Finn Tomteareal
+        try:
+            plotArea_div = nokkelinfo_list.find('div', attrs={'data-testid': 'info-plot-area'})
+            self.plotArea = int(''.join(filter(str.isdigit, plotArea_div.find('dd').text.strip()[:-9])))
+        except Exception as e:
+            logging.info("".join((self.progress, " - ", "Error finding 'Tomteareal'. Exception thrown: ", str(e))))
+
+        # OK frem til hit
+
+        #Finn fasiliteter hoved tags
+        try:
+            facilities_section = tag3.find('section', attrs={'data-testid': 'object-facilities'})
+            facilities_list = facilities_section.find('div')
+        except Exception as e:
+            logging.info("".join((self.progress, " - ", "Error finding main tags for 'Fasiliteter'. Exception thrown: ", str(e))))
+
+        #Extract facilities
+        try:
+            #extract parking and balcony
+            facilities = facilities_list.findAll('div')
+            for i in facilities:
+                facility = i.text.strip()
+                if str(facility) == 'Balkong/Terrasse':
+                    self.balkong = 'Ja'
+                elif str(facility) == 'Garasje/P-plass':
+                    self.parkering = 'Ja'
+            if self.balkong == None:
+                self.balkong = 'Nei'
+            if self.parkering == None:
+                self.parkering = 'Nei'
+        except Exception as e:
+            logging.info("".join((self.progress, " - ", "Error extracting balcony and parking data. Exception thrown: ", str(e))))
+
+        return
+
+main()
+

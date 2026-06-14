@@ -36,10 +36,8 @@ _retry = Retry(
 )
 
 SESSION.mount("https://", HTTPAdapter(max_retries=_retry, pool_connections=80, pool_maxsize=80))
-
-CONFIG_LOCK = threading.Lock()
-MAX_WORKERS = 80
-sem = threading.Semaphore(100000)
+MAX_WORKERS = 60
+sem = threading.Semaphore(MAX_WORKERS)
 
 def main():
     start_time = time.time()
@@ -71,33 +69,30 @@ def main():
                         finished = True
 
             else:
-                def worker(i):
-                    try:
-                        URL = "".join(("https://www.finn.no/realestate/homes/ad.html?finnkode=", str(i)))
+                def worker(URL, configData, i):
 
-                        #Append progression to config file
-                        with CONFIG_LOCK:
-                            Auxiliary.appendProgress(configData, useFile, URL, i)
-
-                        # Extract and store data
-                        extract(URL, configData, str(i))
-                        time.sleep(random.uniform(0.01, 0.05))
-
-                    except Exception as e:
-                        logging.error(f"{i} - Error in worker: {e}")
-                    finally:
-                        sem.release()
+                    # Extract and store data
+                    extract(URL, configData, str(i))
+                    sem.release()
 
                 
-                with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
-                    #count = 0
-                    for i in tqdm(range(start, finish + 1), total=finish - start + 1):
-                        sem.acquire()
-                        executor.submit(worker, i)
-                        #count += 1
-                        #if count >= finish - start + 1:
-                        #    finished = True
-                    finished = True
+                for i in tqdm(range(start, finish + 1), total=finish - start + 1):
+
+                    URL = "".join(("https://www.finn.no/realestate/homes/ad.html?finnkode=", str(i)))
+
+                    #Append progression to config file
+                    Auxiliary.appendProgress(configData, useFile, URL, i)
+
+                    progress = configData.get("progress", "progression")
+
+                    sem.acquire()
+                    newThread = threading.Thread(target=worker, args=(URL, configData, progress))
+                    newThread.start()
+
+                    if (i == finish):
+                        finished = True
+                    #Pause to stop Finn.no from refusing connection
+                    time.sleep(random.uniform(0.05, 0.1))
 
         if(not finished):
             time.sleep(6)
@@ -460,9 +455,8 @@ def extract(URL, configData, progress):
         #Extract ownership history
         #Parse page
         try:
-            Get_page = SESSION.get(eierhistorie_URL)
-            ownership_history_page = BeautifulSoup(Get_page.content, 'html.parser')
-            Get_page.close()
+            with SESSION.get(eierhistorie_URL) as Get_page:
+                ownership_history_page = BeautifulSoup(Get_page.content, 'html.parser')
         except Exception as e:
             logging.info("".join((progress, " - ", "Error parsing ownership history page. Exception thrown: ", str(e))))
 
@@ -486,7 +480,7 @@ def extract(URL, configData, progress):
 
         return DBData
     
-    with SESSION.get(URL, timeout=10, stream=False) as web_page:
+    with SESSION.get(URL) as web_page:
         adpage = BeautifulSoup(web_page.content, "html.parser")
 
     if(adpage_exists(adpage)): #returns true if the ad exists
