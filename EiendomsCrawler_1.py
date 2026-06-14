@@ -475,7 +475,7 @@ def extract(URL, configData, progress):
                 kjopssum = int(''.join(filter(str.isdigit, tag5[len(tag5)-1].text.strip())))
                 kjopsdata = [kjopsdato, kjopssum]
                 DBData["Tidligerekjøp"].append(kjopsdata)
-                ownership_history_page.decompose()
+            ownership_history_page.decompose()
         except Exception as e:
             logging.info("".join((progress, " - ", "Error extracting ownership history. Exception thrown: ", str(e))))
 
