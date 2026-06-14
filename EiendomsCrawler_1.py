@@ -84,8 +84,8 @@ def main():
 
                     except Exception as e:
                         logging.error(f"{i} - Error in worker: {e}")
-                    finally:
-                        gc.collect()
+                    #finally:
+                    #    gc.collect()
                 
                 with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
                     count = 0
