@@ -92,7 +92,7 @@ def main():
                     if (i == finish):
                         finished = True
                     #Pause to stop Finn.no from refusing connection
-                    time.sleep(random.uniform(0.05, 0.1))
+                    time.sleep(random.uniform(0.02, 0.05))
 
         if(not finished):
             time.sleep(6)
